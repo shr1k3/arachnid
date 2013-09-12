@@ -1,174 +1,177 @@
 #!/usr/bin/env node
+
 var express = require('express'),
-  phantom = require('node-phantom'),
-  fs = require('fs'),
-  moment = require('moment'),
-  config,
-  app = express(),
-  staleTime = moment.duration(1, 'weeks'),
-  configure,
-  getContent,
-  getFreshPage,
-  fileIsStale,
-  fileExists,
-  writeToFile,
-  formatFilename,
-  respond;
+    phantom = require('node-phantom'),
+    fs = require('fs'),
+    moment = require('moment'),
+    config,
+    app = express(),
+    staleTime = moment.duration(1, 'weeks'),
+    configure,
+    getContent,
+    getFreshPage,
+    fileIsStale,
+    fileExists,
+    writeToFile,
+    formatFilename,
+    respond;
 
 function isUrl(url) {
-  // Simple URL validation, just validates the scheme name because URL validation is hell.
-  return /^(ftp|http|https):\/\/[^ "]+$/.test(url);
+    // Simple URL validation, just validates the scheme name
+    // because URL validation is hell.
+    return /^(ftp|http|https):\/\/[^ "]+$/.test(url);
 }
 
 configure = function() {
-  // Try to load config file
-  try {
-    config = require ('../config.js');
-  } catch(err) {
-    throw new Error('Could not find the config file! Please make sure a config.js file exists in the project root and is readable.');
-  }
+    // Try to load config file
+    try {
+        config = require ('../config.js');
+    } catch(err) {
+        throw new Error('Could not find the config file! \
+Please make sure a config.js file exists in the project root and is readable.');
+    }
 
-  // Bail out if there's no valid host
-  if (!isUrl(config.host)) {
-    throw new Error('The "host" key should contain a valid URL!');
-  }
+    // Bail out if there's no valid host
+    if (!isUrl(config.host)) {
+        throw new Error('The "host" key should contain a valid URL!');
+    }
 };
 
 writeToFile = function(filename, content) {
-  console.log('Writing to file...');
-  fs.writeFile(formatFilename(filename), content, function(err) {
-    if (err) {
-      console.log(err);
-    } else {
-      console.log('Saved ' + url + ' successfully');
-    }
-  });
+    console.log('Writing to file...');
+    fs.writeFile(formatFilename(filename), content, function(err) {
+        if (err) {
+            console.log(err);
+        } else {
+            console.log('Saved ' + url + ' successfully');
+        }
+    });
 };
 
 fileExists = function(filename) {
-  return fs.existsSync(formatFilename(filename));
+    return fs.existsSync(formatFilename(filename));
 };
 
 fileIsStale = function(filename) {
-  var stats = fs.statSync(filename);
-  return (moment() > staleTime + moment(stats.mtime));
+    var stats = fs.statSync(filename);
+    return (moment() > staleTime + moment(stats.mtime));
 };
 
 formatFilename = function(filename) {
-  var cleanFilename,
-    folder = config.folder;
+    var cleanFilename,
+        folder = config.folder;
 
-  cleanFilename = filename
-    .replace(/:\/\//gi, "_")
-    .replace(/\//gi, "_")
-    .replace(/\?/gi, "_")
-    .replace(/&/gi, "_")
-    .replace(/:/gi, "_");
+    cleanFilename = filename
+        .replace(/:\/\//gi, "_")
+        .replace(/\//gi, "_")
+        .replace(/\?/gi, "_")
+        .replace(/&/gi, "_")
+        .replace(/:/gi, "_");
 
-  if (folder.substr(folder.length -1, folder.length) !== '/') {
-    folder += '/';
-  }
+    if (folder.substr(folder.length -1, folder.length) !== '/') {
+        folder += '/';
+    }
 
-  return folder + cleanFilename;
+    return folder + cleanFilename;
 };
 
 getContent = function(url, callback) {
-  var content = '';
+    var content = '';
 
-  phantom.create(function(err, ph){
-    return ph.createPage(function(err, page) {
+    phantom.create(function(err, ph) {
+        return ph.createPage(function(err, page) {
 
-      var lastReceived = new Date().getTime(),
-        requestCount = 0,
-        responseCount = 0,
-        requestIds = [],
-        startTime = new Date().getTime(),
-        checkComplete,
-        checkCompleteInterval;
+            var lastReceived = new Date().getTime(),
+                requestCount = 0,
+                responseCount = 0,
+                requestIds = [],
+                startTime = new Date().getTime(),
+                checkComplete,
+                checkCompleteInterval;
 
-      page.onConsoleMessage = function(msg, line, source) {
-        console.log('page logs ' + source + ':' + line + ' - ' + msg);
-      };
+            page.onConsoleMessage = function(msg, line, source) {
+                console.log('page logs ' + source + ':' + line + ' - ' + msg);
+            };
 
-      page.onResourceRequested = function(request) {
-        if(requestIds.indexOf(request.id) === -1) {
-          requestIds.push(request.id);
-          requestCount++;
-        }
-      };
+            page.onResourceRequested = function(request) {
+                if(requestIds.indexOf(request.id) === -1) {
+                    requestIds.push(request.id);
+                    requestCount++;
+                }
+            };
 
-      page.onResourceReceived = function(response) {
-        if(requestIds.indexOf(response.id) !== -1) {
-          lastReceived = new Date().getTime();
-          responseCount++;
-          requestIds[requestIds.indexOf(response.id)] = null;
-        }
-      };
+            page.onResourceReceived = function(response) {
+                if(requestIds.indexOf(response.id) !== -1) {
+                    lastReceived = new Date().getTime();
+                    responseCount++;
+                    requestIds[requestIds.indexOf(response.id)] = null;
+                }
+            };
 
-      checkComplete = function() {
-        if((new Date().getTime() - lastReceived > 300 && requestCount === responseCount) || new Date().getTime() - startTime > config.timeout) {
-          clearInterval(checkCompleteInterval);
+            checkComplete = function() {
+                if((new Date().getTime() - lastReceived > 300
+                  && requestCount === responseCount)
+                  || new Date().getTime() - startTime > config.timeout) {
 
-          page.evaluate(function(elem){
-            return document.getElementsByTagName(elem)[0].innerHTML;
-          }, function(err, result){
-            callback(result);
-            ph.exit();
-            ph._phantom.kill()
-          }, 'html');
-        }
-      };
+                    clearInterval(checkCompleteInterval);
 
-      checkCompleteInterval = setInterval(checkComplete, 1);
+                    page.evaluate(function(elem) {
+                        return document.getElementsByTagName(elem)[0].innerHTML;
+                    }, function(err, result) {
+                        callback(result);
+                        ph.exit();
+                        ph._phantom.kill()
+                    }, 'html');
+                }
+            };
 
-      return page.open(url);
+            checkCompleteInterval = setInterval(checkComplete, 1);
+            return page.open(url);
+        });
     });
-  });
 };
 
 getFreshPage = function(res, url) {
-  console.log('Getting a fresh page...');
-  getContent(url, function(content) {
-    if (config.writeToFile && config.folder) {
-      writeToFile(url, content);
-    }
-
-    res.send(content);
-  });
+    console.log('Getting a fresh page...');
+    getContent(url, function(content) {
+        if (config.writeToFile && config.folder) {
+            writeToFile(url, content);
+        }
+        res.send(content);
+    });
 };
 
 respond = function(req, res) {
-  url = req.headers['x-original-uri'];
-  if (!url) {
-   res.status(404).send('Not found');
-   return;
-  }
-
-  url = config.host + url;
-
-  console.log('Handling url: ' + url);
-
-  if (fileExists(url)) {
-    filename = formatFilename(url);
-
-    console.log('File exists, checking for staleness');
-
-    if (fileIsStale(filename)) {
-      return getFreshPage(res, url);
+    url = req.headers['x-original-uri'];
+    if (!url) {
+        res.status(404).send('Not found');
+        return;
     }
 
-    console.log('File exists and is not stale, reading from disk...');
+    url = config.host + url;
+    console.log('Handling url: ' + url);
 
-    fs.readFile(filename, 'utf-8', function(err, content) {
-      if (err) {
-        res.status(500).send(err);
-      } else {
-        res.send(content);
-      }
-    });
-  } else {
-    getFreshPage(res, url);
-  }
+    if (fileExists(url)) {
+        filename = formatFilename(url);
+
+        console.log('File exists, checking for staleness');
+
+        if (fileIsStale(filename)) {
+            return getFreshPage(res, url);
+        }
+
+        console.log('File exists and is not stale, reading from disk...');
+
+        fs.readFile(filename, 'utf-8', function(err, content) {
+            if (err) {
+                res.status(500).send(err);
+            } else {
+                res.send(content);
+            }
+        });
+    } else {
+        getFreshPage(res, url);
+    }
 };
 
 app.get('/*', respond);
